@@ -1,0 +1,9 @@
+import runtime;
+import string;
+main() {
+	array = [0, 1, 2, 3, 4, 5];
+	str_array = map(array, \i -> i2s(i));
+	txt = strGlue(str_array, ", ");
+	println(str_array);
+	println(txt);
+}

@@ -1,0 +1,41 @@
+import runtime;
+import string;
+import ds/tree;
+
+main() -> void {
+    a : [int] = [1, 2, 3, 4, 5, 6, 7, 8, 7, 7, 7];
+    sum : int = 8;
+
+    pairs : [Pair<int, int>] = inds(a, sum);
+	pairs2 = indsNN( a, sum);
+
+    println(pairs);
+	println(pairs2);
+
+    quit(0);
+}
+
+inds(a : [int], m : int) -> [Pair<int, int>] {
+    tree = foldi(a, makeTree(), \i, tree, n -> 
+		switch (lookupTree(tree, n) : Maybe<[int]>) {
+			None() : setTree(tree, n, [i]);
+			Some(repeats) : setTree(tree, n, concat(repeats, [i]));
+		});
+	foldi(a, [], \i, pairs, n -> 
+		switch (lookupTree(tree, m - n) : Maybe<[int]>) {
+			None() : pairs;
+			Some(repeats) : concat(pairs, map(repeats, \ind -> Pair(ind, i)));
+		});
+}  
+
+indsNN(a : [int], m : int) -> [Pair<int, int>] {
+	foldi(a, [], \i, pairs, n -> 
+		foldi(a, pairs, \j, p, k -> 
+			if(n + k == m) {
+				concat(p,[Pair(j,i)])
+				} else {
+					p
+				}
+		)
+	);
+}

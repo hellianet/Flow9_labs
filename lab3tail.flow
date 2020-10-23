@@ -1,0 +1,26 @@
+import runtime;
+import string;
+main() {
+	println(fib(16));
+}
+
+fib(n : int) -> [int] {
+
+	if (n <= 0){
+		[]
+	} else if (n == 1){
+		[0];
+	} else{
+		a : [int] = [0, 1];
+		tailFib(n, a);
+	}
+}
+
+tailFib(n : int, a : [int]) -> [int]{
+	len = length(a);
+	if(len < n){
+		tailFib(n, concat(a, [a[len - 1] + a[len - 2]]));
+	} else{
+		a;
+	}
+}

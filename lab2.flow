@@ -1,0 +1,12 @@
+import runtime;
+import string;
+
+main() {
+	array = [0, 1, 2, 3, 4, 5];
+	sum = sum(array);
+	println(sum);
+}
+
+sum(a:[int])->int{
+	fold(a, 0, \x, y->x + y);
+}

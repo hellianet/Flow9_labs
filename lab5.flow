@@ -1,0 +1,217 @@
+import lingo/pegcode/driver;
+Expr ::= Num, Sub, Add, Mult, Div, Var, Pow, Log, Neg;
+Num(number : double);
+Sub(left : Expr, right : Expr);
+Add(left : Expr, right : Expr);
+Mult(left : Expr, right : Expr);
+Div(left : Expr, right : Expr);
+Var(var : string);
+Pow(left : Expr, right : Expr);
+Log(var : Expr);
+Neg(expr: Expr);
+
+// Singleton keeping the compiled grammar
+
+lingoGrammarOp : ref Maybe<[PegOp]> = ref None();
+lingoGrammar() {
+    // Prepare the grammar in the given file using flow syntax for inlining a string from a file
+    // but be sure to only do this once
+    onlyOnce(lingoGrammarOp, \ -> {
+    compilePegGrammar("#include lingo.lingo");
+    });
+}
+
+astToString(expr : Expr) -> string{
+    switch(expr){
+        Sub(l, r) :   "Sub("  + astToString(l) + ", " + astToString(r) + ")";
+        Div(l, r) :   "Div("  + astToString(l) + ", " + astToString(r) + ")";
+        Mult(l, r) :  "Mult(" + astToString(l) + ", " + astToString(r) + ")";
+        Add(l, r) :   "Add("  + astToString(l) + ", " + astToString(r) + ")";
+        Num(number) : "Num("  + d2s(number)    +                         ")";
+        Var(v):       "Var("  + v              +                         ")";
+        Pow(l, r) :   "Pow("  + astToString(l) + ", " + astToString(r) + ")";
+        Log(v) :      "Log("  + astToString(v) +                         ")";
+        Neg(e) :      "Neg("  + astToString(e) +                         ")";
+    }
+}
+
+astToExpressionString(expr: Expr)->string{
+    switch(expr){
+        Sub(l, r) :   "(" + astToExpressionString(l) + "-" + astToExpressionString(r) + ")";
+        Div(l, r) :   "(" + astToExpressionString(l) + "/" + astToExpressionString(r) + ")";
+        Mult(l, r) :  "(" + astToExpressionString(l) + "*" + astToExpressionString(r) + ")";
+        Add(l, r) :   "(" + astToExpressionString(l) + "+" + astToExpressionString(r) + ")";
+        Num(number) : d2s(number);
+        Var(v):       v;
+        Pow(l, r) :   "(" + astToExpressionString(l) + "^" + astToExpressionString(r) + ")";
+        Log(v) :      "log("                               + astToExpressionString(v) + ")";
+        Neg(v) :      "(-"                               + astToExpressionString(v) + ")";
+    }
+}
+
+simplify(expr : Expr) -> Expr{
+    switch (expr) {
+        Add(l, r): {
+            left = simplify(l);
+            right = simplify(r);
+            if(left == Num(0.0)) {
+                right;
+            } else if(right == Num(0.0)) {
+                left;
+            } else {
+                Add(left, right);
+            }
+        }
+        Sub(l, r): {
+            left = simplify(l);
+            right = simplify(r);
+            if(left == Num(0.0)){
+                Neg(right);
+            } else if (right == Num(0.0)) {
+                left;
+            } else {
+                Sub(left, right);
+            }
+        }
+        Mult(l, r): {
+            left = simplify(l);
+            right = simplify(r);
+            if(left == Num(1.0)) {
+                right;
+            } else if(right == Num(1.0)) {
+                left;
+            } else {
+                Mult(left, right);
+            }
+        }
+        Div(l, r): {
+            left = simplify(l);
+            right = simplify(r);
+            if(left == Num(0.0) && right != Num(0.0)) {
+                Num(0.0);
+            } else if(right == Num(1.0)) {
+                left;
+            } else {
+                Div(left, right);
+            }
+        }
+        Pow(l, r):{
+            left = simplify(l);
+            right = simplify(r);
+            if(left != Num(0.0) && right == Num(0.0)) {
+                Num(1.0);
+            } else if(left == Num(0.0) && right != Num(0.0)) {
+                Num(0.0);
+            } else {
+                Pow(left, right);
+            }
+        }
+        Log(e):{
+            expression = simplify(e);
+            if(e == Num(1.0)){
+                Num(0.0);
+            } else {
+                Log(expression);
+            }
+        }
+        Neg(e):{
+            expression = simplify(e);
+            switch(expression){
+                Neg(ex):ex;
+                Num(ex):Num(-ex);
+                default:expression;
+            }
+        }
+        default: expr;
+    }
+}
+
+calculate(expr : Expr, variables : Tree<string, double>) -> Maybe<double>{
+
+    getValue = \l, r, operator -> {
+        switch(calculate(l, variables)) {
+            Some(left) : switch(calculate(r, variables)){
+                Some(right) : operator(left, right);
+                None() : None();
+            }
+            None() : None();
+        }
+    }
+
+    switch(expr){
+        Sub(l, r) : getValue(l, r, \left, right -> Some(left - right));
+        Div(l, r) : getValue(l, r, \left, right -> if(right == 0.0){
+                        None();
+                    } else {
+                        Some(left/right);
+                        })
+        Mult(l, r) : getValue(l, r, \left, right -> Some(left * right));
+        Add(l, r) : getValue(l, r, \left, right -> Some(left + right));
+        Num(number) : Some(number);
+        Var(name): lookupTree(variables, name);
+        Pow(l, r): getValue(l, r, \left, right -> dpow2(left,right));
+        Log(v):switch(calculate(v,variables)){
+            Some(value): if(value <= 0.0){
+                None();
+            } else{Some(log(value));}
+            None():None();
+        }
+        Neg(e):switch(calculate(e,variables)){
+            Some(value):Some(-value);
+            None():None();
+        }
+
+    }
+}
+getVariables() -> Tree<string, double> {
+	parameters_array = getAllUrlParametersArray();
+	fold(parameters_array, makeTree(),\ tree, parameter-> {
+			setTree(tree, parameter[0], s2d(parameter[1]))
+		}
+	);
+}
+
+main() {
+    // Here we parse a string against the grammar
+
+    expression = if (isUrlParameterSet("e")) {
+		getUrlParameter("e");
+	} else {
+		//"(625^0.5)"; //25
+        "(((log(((1.3+2.3)^4.1))-2)*3)/(3-(-8)))"; //0.88686239
+	}
+
+    expressions = [ "(-(-(-(-1))))",
+                    "(3^0)",
+                    "(0^3)",
+                    "((1+0)+(0+1))",
+                    "((1-0)*(0-1))",
+                    "(1*(1*0))",
+                    "(0/3)",
+                    "(3/1)",
+                    "log(1)"];
+
+    variables = getVariables();
+    result = parsic(lingoGrammar(), expression, defaultPegActions);
+    
+    println("AST:");
+    println(result);
+    println("AST to string:");
+    println(astToString(result));
+    println("Expression:");
+    println(expression);
+    println("AST to expression:");
+    println(astToExpressionString(result));
+    println("Simplified expressions");
+
+    iter(expressions,\e->{
+        res = parsic(lingoGrammar(), e, defaultPegActions);
+        println(astToExpressionString(res) + " -> " + astToExpressionString(simplify(res)));
+    });
+
+    switch (calculate(result,variables)) {
+        Some(value) : println("Calculated value: "+ d2s(value));
+        None() : println("Could not calculate value");
+    }
+    quit(0);
+}
