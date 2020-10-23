@@ -28,7 +28,7 @@ astToString(expr : Expr) -> string{
         Mult(l, r) :  "Mult(" + astToString(l) + ", " + astToString(r) + ")";
         Add(l, r) :   "Add("  + astToString(l) + ", " + astToString(r) + ")";
         Num(number) : "Num("  + d2s(number)    +                         ")";
-        Var(v):       "Var("  + v              +                         ")";
+        Var(v):       "Var(\""+ v              +                       "\")";
         Pow(l, r) :   "Pow("  + astToString(l) + ", " + astToString(r) + ")";
         Log(v) :      "Log("  + astToString(v) +                         ")";
         Neg(e) :      "Neg("  + astToString(e) +                         ")";
@@ -59,7 +59,15 @@ simplify(expr : Expr) -> Expr{
             } else if(right == Num(0.0)) {
                 left;
             } else {
-                Add(left, right);
+                switch(right){
+                   Num(v) : if(v < 0.0){
+                        Sub(left, Num(-v));
+                    } else{
+                        Add(left, Num(v));
+                    }
+                    Neg(v) : Sub(left, v);
+                    default : Add(left, right); 
+                }
             }
         }
         Sub(l, r): {
@@ -69,8 +77,16 @@ simplify(expr : Expr) -> Expr{
                 Neg(right);
             } else if (right == Num(0.0)) {
                 left;
-            } else {
-                Sub(left, right);
+            } else{
+                switch(right){
+                    Num(v) : if(v < 0.0){
+                        Add(left, Num(-v));
+                    } else{
+                        Sub(left, Num(v));
+                    }
+                    Neg(v) : Add(left, v);
+                    default : Sub(left, right);
+                }
             }
         }
         Mult(l, r): {
@@ -80,7 +96,9 @@ simplify(expr : Expr) -> Expr{
                 right;
             } else if(right == Num(1.0)) {
                 left;
-            } else {
+            } else if (left == Num(0.0) || right == Num(0.0)) {
+                Num(0.0);
+            } else{
                 Mult(left, right);
             }
         }
@@ -127,7 +145,6 @@ simplify(expr : Expr) -> Expr{
 }
 
 calculate(expr : Expr, variables : Tree<string, double>) -> Maybe<double>{
-
     getValue = \l, r, operator -> {
         switch(calculate(l, variables)) {
             Some(left) : switch(calculate(r, variables)){
@@ -137,7 +154,6 @@ calculate(expr : Expr, variables : Tree<string, double>) -> Maybe<double>{
             None() : None();
         }
     }
-
     switch(expr){
         Sub(l, r) : getValue(l, r, \left, right -> Some(left - right));
         Div(l, r) : getValue(l, r, \left, right -> if(right == 0.0){
@@ -163,24 +179,22 @@ calculate(expr : Expr, variables : Tree<string, double>) -> Maybe<double>{
 
     }
 }
-getVariables() -> Tree<string, double> {
-	parameters_array = getAllUrlParametersArray();
-	fold(parameters_array, makeTree(),\ tree, parameter-> {
-			setTree(tree, parameter[0], s2d(parameter[1]))
-		}
-	);
+
+derivative(expr : Expr, var : string) -> Expr {
+    simplify(switch(expr) {
+        Add(l, r) : Add(derivative(l,var),derivative(r,var));
+        Sub(l, r) : Sub(derivative(l,var),derivative(r,var));
+        Neg(e) : Neg(derivative(e,var));
+        Mult(l, r) : Add(Mult(derivative(l,var),r),Mult(l,derivative(r,var)));
+        Div(l, r): Div(Sub(Mult(derivative(l,var),r),Mult(l,derivative(r,var))),Mult(r,r));
+        Pow(l, r): Mult(Pow(l,r),Add(Mult(derivative(r,var),Log(l)),Div(Mult(r,derivative(l,var)),l)));
+        Log(e): Div(derivative(e,var),e);
+        Num(value): Num(0.0);
+        Var(v):if(v==var){Num(1.0);} else{Num(0.0);};
+    })
 }
 
-main() {
-    // Here we parse a string against the grammar
-
-    expression = if (isUrlParameterSet("e")) {
-		getUrlParameter("e");
-	} else {
-		//"(625^0.5)"; //25
-        "(((log(((1.3+2.3)^4.1))-2)*3)/(3-(-8)))"; //0.88686239
-	}
-
+simplifyTest() {
     expressions = [ "(-(-(-(-1))))",
                     "(3^0)",
                     "(0^3)",
@@ -191,27 +205,87 @@ main() {
                     "(3/1)",
                     "log(1)"];
 
+    println("\nSimplify expressions test:");
+    iter(expressions,\e->{
+        res = parsic(lingoGrammar(), e, defaultPegActions);
+        println(astToExpressionString(res) + " -> " + astToExpressionString(simplify(res)));
+    });                  
+
+}
+
+derivativeTest() {
+    expressions = [ "(x^2)",
+                    "(2^x)",
+                    "x",
+                    "1",
+                    "log(x)",
+                    "(1+(3*x))",
+                    "(2*x)",
+                    "(1/x)"];
+
+    println("\nDerivatives test:");
+    iter(expressions,\e->{
+        res = parsic(lingoGrammar(), e, defaultPegActions);
+        println(astToExpressionString(res) + " -> " + astToExpressionString(derivative(res, "x")));
+    });                  
+
+}
+
+getVariables() -> Tree<string, double> {
+	parameters_array = getAllUrlParametersArray();
+	fold(parameters_array, makeTree(),\ tree, parameter-> {
+			setTree(tree, parameter[0], s2d(parameter[1]))
+		}
+	);
+}
+
+printValue(name : string,value : Maybe<double>){
+    switch (value) {
+        Some(v) : println(name + " calculated value: " + d2s(v));
+        None() : println("Could not calculate " + name + " value");
+    }
+}
+
+main() {
+    expression = if (isUrlParameterSet("expression")) {
+		getUrlParameter("expression");
+	} else {
+        "(((log(((1.3+2.3)^4.1))-2)*3)/(3-(-8)))"; //0.88686239
+	}
+
+   
     variables = getVariables();
     result = parsic(lingoGrammar(), expression, defaultPegActions);
     
+    println("Expression:");
+    println(expression);
     println("AST:");
     println(result);
     println("AST to string:");
     println(astToString(result));
-    println("Expression:");
-    println(expression);
     println("AST to expression:");
     println(astToExpressionString(result));
-    println("Simplified expressions");
+    println("Simplified expression:");
+    println(astToExpressionString(simplify(result)));
 
-    iter(expressions,\e->{
-        res = parsic(lingoGrammar(), e, defaultPegActions);
-        println(astToExpressionString(res) + " -> " + astToExpressionString(simplify(res)));
-    });
-
-    switch (calculate(result,variables)) {
-        Some(value) : println("Calculated value: "+ d2s(value));
-        None() : println("Could not calculate value");
+    if (isUrlParameterSet("derivative")) {
+				var = getUrlParameter("derivative");
+				if (var != "") {
+					res = derivative(result, var);
+					println("Derivative AST: " + astToString(res));
+					println("Derivative AST to expression string: " + astToExpressionString(res));
+                    printValue("Derivative",calculate(res,variables));
+				} else {
+					println("Derivative variable is not specified");
+					quit(-1);
+				}
     }
+
+    printValue("Expression", calculate(result,variables));
+    if (isUrlParameterSet("test")){
+        simplifyTest();
+        derivativeTest();
+    }
+
     quit(0);
 }
