@@ -113,7 +113,7 @@ simplify(expr : Expr) -> Expr{
                 Div(left, right);
             }
         }
-        Pow(l, r):{
+        Pow(l, r) : {
             left = simplify(l);
             right = simplify(r);
             if(left != Num(0.0) && right == Num(0.0)) {
@@ -135,9 +135,9 @@ simplify(expr : Expr) -> Expr{
         Neg(e):{
             expression = simplify(e);
             switch(expression){
-                Neg(ex):ex;
-                Num(ex):Num(-ex);
-                default:expression;
+                Neg(ex) : ex;
+                Num(ex) : Num(-ex);
+                default : expression;
             }
         }
         default: expr;
@@ -156,42 +156,56 @@ calculate(expr : Expr, variables : Tree<string, double>) -> Maybe<double>{
     }
     switch(expr){
         Sub(l, r) : getValue(l, r, \left, right -> Some(left - right));
-        Div(l, r) : getValue(l, r, \left, right -> if(right == 0.0){
+        Div(l, r) : getValue(l, r, \left, right -> if(right == 0.0) {
                         None();
                     } else {
-                        Some(left/right);
-                        })
+                        Some(left / right);
+                        });
         Mult(l, r) : getValue(l, r, \left, right -> Some(left * right));
         Add(l, r) : getValue(l, r, \left, right -> Some(left + right));
         Num(number) : Some(number);
-        Var(name): lookupTree(variables, name);
-        Pow(l, r): getValue(l, r, \left, right -> dpow2(left,right));
-        Log(v):switch(calculate(v,variables)){
+        Var(name) : lookupTree(variables, name);
+        Pow(l, r) : getValue(l, r, \left, right -> dpow2(left, right));
+        Log(v) : switch(calculate(v, variables)) {
             Some(value): if(value <= 0.0){
                 None();
-            } else{Some(log(value));}
-            None():None();
+            } else {
+                Some(log(value));
+                }
+            None() : None();
         }
-        Neg(e):switch(calculate(e,variables)){
-            Some(value):Some(-value);
-            None():None();
+        Neg(e) : switch(calculate(e, variables)) {
+            Some(value) : Some(-value);
+            None() : None();
         }
 
     }
 }
 
 derivative(expr : Expr, var : string) -> Expr {
-    simplify(switch(expr) {
-        Add(l, r) : Add(derivative(l,var),derivative(r,var));
-        Sub(l, r) : Sub(derivative(l,var),derivative(r,var));
-        Neg(e) : Neg(derivative(e,var));
-        Mult(l, r) : Add(Mult(derivative(l,var),r),Mult(l,derivative(r,var)));
-        Div(l, r): Div(Sub(Mult(derivative(l,var),r),Mult(l,derivative(r,var))),Mult(r,r));
-        Pow(l, r): Mult(Pow(l,r),Add(Mult(derivative(r,var),Log(l)),Div(Mult(r,derivative(l,var)),l)));
-        Log(e): Div(derivative(e,var),e);
-        Num(value): Num(0.0);
-        Var(v):if(v==var){Num(1.0);} else{Num(0.0);};
-    })
+    switch(expr) {
+        Add(l, r) : Add(derivative(l, var),derivative(r, var));
+        Sub(l, r) : Sub(derivative(l, var),derivative(r, var));
+        Neg(e) : Neg(derivative(e, var));
+        Mult(l, r) : Add(
+            Mult(derivative(l, var), r), 
+            Mult(l, derivative(r, var)));
+        Div(l, r) : Div(
+            Sub(
+                Mult(derivative(l, var), r),
+                Mult(l, derivative(r, var))),
+            Mult(r, r));
+        Pow(l, r) : Mult(
+            Pow(l, r),
+            Add(Mult(derivative(r, var), Log(l)), Div(Mult(r, derivative(l, var)), l)));
+        Log(e) : Div(derivative(e, var), e);
+        Num(value) : Num(0.0);
+        Var(v) : if(v == var) {
+            Num(1.0);
+            } else {
+                Num(0.0);
+                }
+    }
 }
 
 simplifyTest() {
@@ -247,12 +261,12 @@ printValue(name : string,value : Maybe<double>){
 }
 
 main() {
+
     expression = if (isUrlParameterSet("expression")) {
 		getUrlParameter("expression");
 	} else {
         "(((log(((1.3+2.3)^4.1))-2)*3)/(3-(-8)))"; //0.88686239
 	}
-
    
     variables = getVariables();
     result = parsic(lingoGrammar(), expression, defaultPegActions);
@@ -267,21 +281,22 @@ main() {
     println(astToExpressionString(result));
     println("Simplified expression:");
     println(astToExpressionString(simplify(result)));
+    printValue("Expression", calculate(result,variables));
 
     if (isUrlParameterSet("derivative")) {
-				var = getUrlParameter("derivative");
-				if (var != "") {
-					res = derivative(result, var);
-					println("Derivative AST: " + astToString(res));
-					println("Derivative AST to expression string: " + astToExpressionString(res));
-                    printValue("Derivative",calculate(res,variables));
-				} else {
-					println("Derivative variable is not specified");
-					quit(-1);
-				}
+        var = getUrlParameter("derivative");
+        if (var != "") {
+            res = derivative(result, var);
+            simp_res=simplify(res);
+            println("Derivative AST: " + astToString(simp_res));
+            println("Derivative AST to expression string: " + astToExpressionString(res));
+            println("Derivative AST to expression string(simplified): " + astToExpressionString(simp_res));
+            printValue("Derivative", calculate(simp_res,variables));
+        } else {
+            println("Derivative variable is not specified");
+        }
     }
 
-    printValue("Expression", calculate(result,variables));
     if (isUrlParameterSet("test")){
         simplifyTest();
         derivativeTest();
