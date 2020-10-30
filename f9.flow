@@ -1,0 +1,181 @@
+import lingo/pegcode/driver;
+Expr ::= Num, Sub, Add, Mult, Div, Pow, Log/*, Var*/,   Neg;
+Num(number : double);
+Sub(left : Expr, right : Expr);
+Add(left : Expr, right : Expr);
+Mult(left : Expr, right : Expr);
+Div(left : Expr, right : Expr);
+Pow(left : Expr, right : Expr);
+Log(var : Expr);
+//Var(var : string);
+Neg(expr: Expr);
+
+ArRPN ::= OpRPN, ArgRPN;
+	OpRPN ::= AddRPN, MultRPN, SubRPN, DivRPN, PowRPN, LogRPN, NegRPN;
+	ArgRPN(val : double);
+	AddRPN(); MultRPN(); SubRPN(); DivRPN(); PowRPN(); LogRPN(); NegRPN();
+
+// Singleton keeping the compiled grammar
+
+lingoGrammarOp : ref Maybe<[PegOp]> = ref None();
+lingoGrammar() {
+    // Prepare the grammar in the given file using flow syntax for inlining a string from a file
+    // but be sure to only do this once
+    onlyOnce(lingoGrammarOp, \ -> {
+    compilePegGrammar("#include lingo.lingo");
+    });
+}
+
+
+rpn2s(e : [ArRPN]) -> string {
+	fold(e, "", \acc, r -> {
+			switch(r) {
+				ArgRPN(v): acc + d2s(v) + " ";
+				AddRPN():  acc + "+ "; 
+				MultRPN(): acc + "* ";
+				SubRPN(): acc + "- ";
+				DivRPN(): acc + "/ ";
+				PowRPN(): acc + "^ ";
+				LogRPN(): acc + "log ";
+				NegRPN(): acc +"(-) ";
+			}
+		}
+	)
+}
+
+rpn2i(e : [ArRPN]) -> Maybe<double> {
+	apply_op = \op, stack -> {
+		switch(stack) {
+			Cons(v1, t1): {
+				switch (op){
+					LogRPN(): {
+						if(v1>0.0){Some(Cons(log(v1), t1));} else {None();}
+						}
+					NegRPN(): Some(Cons(-v1, t1));
+					default: {
+						switch(t1) {
+							Cons(v2, t2): {
+								switch (op) {
+									AddRPN(): Some(Cons(v1 + v2, t2));
+									MultRPN(): Some(Cons(v1 * v2, t2));
+									SubRPN(): Some(Cons(v2 - v1, t2));
+									DivRPN(): {
+										if(v1 != 0.0) {
+											Some(Cons(v2 / v1, t2));
+										} else {
+											None();
+										}
+									}
+									PowRPN(): {
+										maybeBind(dpow2(v2, v1), \v-> {
+											Some(Cons(v, t2));
+										});
+									}
+									default: None();
+								}
+							}
+							EmptyList(): None();
+						}
+					}
+				}
+			}
+			EmptyList(): None();
+		}
+	}
+	stack = fold(e, Some(makeList()), \acc, r -> {
+			maybeBind(acc, \ac -> {
+					switch(r) {
+						ArgRPN(v): Some(Cons(v, ac));
+						OpRPN(): apply_op(r, ac);
+					}
+				}
+			)
+		}
+	);
+	maybeBind(stack, \s ->
+		switch (s) {
+			Cons(v, t): if (t == EmptyList()) Some(v) else None();
+			EmptyList(): None();
+		}
+	)
+}
+
+ar2rpn(e : Expr) -> [ArRPN] {
+	switch (e) {
+		Add(l, r): concat(concat(ar2rpn(l), ar2rpn(r)), [AddRPN()]);
+		Mult(l, r): concat(concat(ar2rpn(l), ar2rpn(r)), [MultRPN()]);
+		Sub(l, r): concat(concat(ar2rpn(l), ar2rpn(r)), [SubRPN()]);
+		Div(l, r): concat(concat(ar2rpn(l), ar2rpn(r)), [DivRPN()]);
+		Pow(l, r): concat(concat(ar2rpn(l), ar2rpn(r)), [PowRPN()]);
+		Log(l): concat(ar2rpn(l),[LogRPN()]);
+		Neg(l): concat(ar2rpn(l),[NegRPN()]);
+		Num(v): [ArgRPN(v)];
+	}
+}
+
+rpn2ar(e : [ArRPN]) -> Maybe<Expr> {
+	apply_op = \op, stack -> {
+		switch(stack) {
+			Cons(v1, t1): {
+				switch (op) {
+					LogRPN(): Some(Cons(Log(v1), t1));
+					NegRPN(): Some(Cons(Neg(v1), t1));
+					default:{
+						switch(t1) {
+							Cons(v2, t2): {
+								switch (op) {
+									AddRPN(): Some(Cons(Add(v2, v1), t2));
+									SubRPN(): Some(Cons(Sub(v2, v1), t2));
+									MultRPN(): Some(Cons(Mult(v2, v1), t2));
+									DivRPN(): Some(Cons(Div(v2, v1), t2));
+									PowRPN(): Some(Cons(Pow(v2, v1), t2));
+									default: None();
+								}
+							}
+							EmptyList(): None();
+						}
+					}
+				}	
+			}
+			EmptyList(): None();
+		}
+	}
+	stack = fold(e, Some(makeList()), \acc, r -> {
+			maybeBind(acc, \ac -> {
+					switch(r) {
+						ArgRPN(v): Some(Cons(Num(v), ac));
+						OpRPN(): apply_op(r, ac);
+					}
+				}
+			)
+		}
+	);
+	maybeBind(stack, \s ->
+		switch (s) {
+			Cons(v, t): if (t == EmptyList()) Some(v) else None();
+			EmptyList(): None();
+		}
+	)
+}
+
+
+
+main() {
+
+    expression = "(-log((1+1.7)))";
+   
+    result = parsic(lingoGrammar(), expression, defaultPegActions);
+    
+    println("Expression:");
+    println(expression);
+    println("AST:");
+    println(result);
+	rpn=ar2rpn(result);
+	println(rpn);
+	println(rpn2s(rpn));
+	println(rpn2i(rpn));
+	println(rpn2ar(rpn));
+
+   
+    quit(0);
+}
