@@ -1,5 +1,5 @@
 import lingo/pegcode/driver;
-Expr ::= Num, Sub, Add, Mult, Div, Pow, Log/*, Var*/,   Neg;
+Expr ::= Num, Sub, Add, Mult, Div, Pow, Log, Var,   Neg;
 Num(number : double);
 Sub(left : Expr, right : Expr);
 Add(left : Expr, right : Expr);
@@ -7,12 +7,13 @@ Mult(left : Expr, right : Expr);
 Div(left : Expr, right : Expr);
 Pow(left : Expr, right : Expr);
 Log(var : Expr);
-//Var(var : string);
+Var(var : string);
 Neg(expr: Expr);
 
-ArRPN ::= OpRPN, ArgRPN;
+ArRPN ::= OpRPN, ArgRPN, VarRPN;
 	OpRPN ::= AddRPN, MultRPN, SubRPN, DivRPN, PowRPN, LogRPN, NegRPN;
 	ArgRPN(val : double);
+	VarRPN(var : string);
 	AddRPN(); MultRPN(); SubRPN(); DivRPN(); PowRPN(); LogRPN(); NegRPN();
 
 // Singleton keeping the compiled grammar
@@ -27,7 +28,7 @@ lingoGrammar() {
 }
 
 
-rpn2s(e : [ArRPN]) -> string {
+rpnToString(e : [ArRPN]) -> string {
 	fold(e, "", \acc, r -> {
 			switch(r) {
 				ArgRPN(v): acc + d2s(v) + " ";
@@ -38,12 +39,13 @@ rpn2s(e : [ArRPN]) -> string {
 				PowRPN(): acc + "^ ";
 				LogRPN(): acc + "log ";
 				NegRPN(): acc +"(-) ";
+				VarRPN(x): acc + x + " ";
 			}
 		}
 	)
 }
 
-rpn2i(e : [ArRPN]) -> Maybe<double> {
+calculateRpn(e : [ArRPN], variables : Tree<string, double>) -> Maybe<double> {
 	apply_op = \op, stack -> {
 		switch(stack) {
 			Cons(v1, t1): {
@@ -87,6 +89,9 @@ rpn2i(e : [ArRPN]) -> Maybe<double> {
 					switch(r) {
 						ArgRPN(v): Some(Cons(v, ac));
 						OpRPN(): apply_op(r, ac);
+						VarRPN(name): maybeBind(lookupTree(variables,name),\v->{
+							Some(Cons(v,ac));
+						});
 					}
 				}
 			)
@@ -100,20 +105,21 @@ rpn2i(e : [ArRPN]) -> Maybe<double> {
 	)
 }
 
-ar2rpn(e : Expr) -> [ArRPN] {
+expressionToRpn(e : Expr) -> [ArRPN] {
 	switch (e) {
-		Add(l, r): concat(concat(ar2rpn(l), ar2rpn(r)), [AddRPN()]);
-		Mult(l, r): concat(concat(ar2rpn(l), ar2rpn(r)), [MultRPN()]);
-		Sub(l, r): concat(concat(ar2rpn(l), ar2rpn(r)), [SubRPN()]);
-		Div(l, r): concat(concat(ar2rpn(l), ar2rpn(r)), [DivRPN()]);
-		Pow(l, r): concat(concat(ar2rpn(l), ar2rpn(r)), [PowRPN()]);
-		Log(l): concat(ar2rpn(l),[LogRPN()]);
-		Neg(l): concat(ar2rpn(l),[NegRPN()]);
+		Add(l, r): concat(concat(expressionToRpn(l), expressionToRpn(r)), [AddRPN()]);
+		Mult(l, r): concat(concat(expressionToRpn(l), expressionToRpn(r)), [MultRPN()]);
+		Sub(l, r): concat(concat(expressionToRpn(l), expressionToRpn(r)), [SubRPN()]);
+		Div(l, r): concat(concat(expressionToRpn(l), expressionToRpn(r)), [DivRPN()]);
+		Pow(l, r): concat(concat(expressionToRpn(l), expressionToRpn(r)), [PowRPN()]);
+		Log(l): concat(expressionToRpn(l),[LogRPN()]);
+		Neg(l): concat(expressionToRpn(l),[NegRPN()]);
+		Var(v): [VarRPN(v)];
 		Num(v): [ArgRPN(v)];
 	}
 }
 
-rpn2ar(e : [ArRPN]) -> Maybe<Expr> {
+rpnToExpression(e : [ArRPN]) -> Maybe<Expr> {
 	apply_op = \op, stack -> {
 		switch(stack) {
 			Cons(v1, t1): {
@@ -144,6 +150,7 @@ rpn2ar(e : [ArRPN]) -> Maybe<Expr> {
 			maybeBind(acc, \ac -> {
 					switch(r) {
 						ArgRPN(v): Some(Cons(Num(v), ac));
+						VarRPN(v): Some(Cons(Var(v),ac));
 						OpRPN(): apply_op(r, ac);
 					}
 				}
@@ -158,24 +165,97 @@ rpn2ar(e : [ArRPN]) -> Maybe<Expr> {
 	)
 }
 
+stringToRpn(exprString : string) -> [ArRPN] {
+    result = ref [];
+    strSplitIterate(exprString, " ", \ token -> {
+        if (isDouble(token)) {
+            refArrayPush(result, ArgRPN(s2d(token)));
+        } else if (token == "") {
+            // skip
+        } else if (token == "+") {
+            refArrayPush(result, AddRPN());
+        } else if (token == "-") {
+            refArrayPush(result, SubRPN());
+        } else if (token == "*") {
+            refArrayPush(result, MultRPN());
+        } else if (token == "/") {
+            refArrayPush(result, DivRPN());
+        } else if (token == "^") {
+            refArrayPush(result, PowRPN());
+        } else if (token == "log") {
+            refArrayPush(result, LogRPN());
+        } else if (token == "(-)") {
+			refArrayPush(result, NegRPN());
+		} else {
+            refArrayPush(result, VarRPN(token));
+        }
+    });
+    
+   ^result;
+}
+
+getVariables() -> Tree<string, double> {
+	parameters_array = getAllUrlParametersArray();
+	fold(parameters_array, makeTree(),\ tree, parameter-> {
+			setTree(tree, parameter[0], s2d(parameter[1]))
+		}
+	);
+}
+
+printValue(value : Maybe<double>){
+    switch (value) {
+        Some(v) : println("Calculated value: " + d2s(v));
+        None() : println("Could not calculate " + " value");
+    }
+}
+
+astToExpressionString(expr: Expr)->string{
+    switch(expr){
+        Sub(l, r) :   "(" + astToExpressionString(l) + "-" + astToExpressionString(r) + ")";
+        Div(l, r) :   "(" + astToExpressionString(l) + "/" + astToExpressionString(r) + ")";
+        Mult(l, r) :  "(" + astToExpressionString(l) + "*" + astToExpressionString(r) + ")";
+        Add(l, r) :   "(" + astToExpressionString(l) + "+" + astToExpressionString(r) + ")";
+        Num(number) : d2s(number);
+        Var(v):       v;
+        Pow(l, r) :   "(" + astToExpressionString(l) + "^" + astToExpressionString(r) + ")";
+        Log(v) :      "log("                               + astToExpressionString(v) + ")";
+        Neg(v) :      "(-"                               + astToExpressionString(v) + ")";
+    }
+}
 
 
 main() {
 
-    expression = "(-log((1+1.7)))";
-   
-    result = parsic(lingoGrammar(), expression, defaultPegActions);
-    
-    println("Expression:");
-    println(expression);
-    println("AST:");
-    println(result);
-	rpn=ar2rpn(result);
-	println(rpn);
-	println(rpn2s(rpn));
-	println(rpn2i(rpn));
-	println(rpn2ar(rpn));
+    variables = getVariables();
 
-   
+	if (isUrlParameterSet("rpn")) {
+		expr = getUrlParameter("rpn");
+		println("RPN: " + expr);
+		rpn = stringToRpn(expr);
+		println("RPN to string: " + rpnToString(rpn));
+		ast = rpnToExpression(rpn);
+		switch(ast) {
+			Some(ex): println("RPN to expression " + astToExpressionString(ex));
+			None(): println("Failed to convert from RPN to expression");
+		}
+		printValue(calculateRpn(rpn,variables));
+	}
+
+	println("");
+
+	if (isUrlParameterSet("expression")) {
+		expr = getUrlParameter("expression");
+		result = parsic(lingoGrammar(), expr, defaultPegActions);
+		println("Expression:" + expr);
+		rpn = expressionToRpn(result);
+		println("RPN: " + rpnToString(rpn));
+		ast = rpnToExpression(rpn);
+		switch(ast){
+			Some(ex): println("RPN to expression " + astToExpressionString(ex));
+			None(): println("Failed to convert from RPN to expression");
+		}
+		printValue(calculateRpn(rpn, variables));
+	}
+    
     quit(0);
 }
